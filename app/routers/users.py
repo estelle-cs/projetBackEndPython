@@ -1,67 +1,114 @@
 #System imports
 
 #Libs imports
-from fastapi import APIRouter, status, Response, HTTPException
+from typing import Annotated, List, Optional
+from fastapi import APIRouter, status, HTTPException, Depends, Body
 
 #Local imports
 from internal.models import User
+from database import mydb
+from internal.auth import decode_token
+
 
 router = APIRouter()
 
-# bellow is a first way to instantiate a list of data. Here we instantiate them as dicts
-users = [
-    {"id": 1, "name": "test1", "password_hash": "b7e507f7b30caff568e11c613de215eba2f861b8545ef8c30298fdf9ddcd97e8", "password": "bambi"},
-    {"id": 2, "name": "test2", "password_hash": "467baa6c1a9337043bbf7837b4ab15022f8d5002c10947a844112ae988a5e910", "password": "johnDoe"},
-    {"id": 4, "name": "test4", "password_hash": "57d96f829f4d296f5553126cf31a6939c36ba45fc397fd80274d67239c5322a9", "password": "Casper"},
-    {"id": 3, "name": "test3", "password_hash": "742f552b7848035dc31cc11cda62d5eada07fc53ba17b9a18097a83bed055847", "password": "Beverlyhills"}
-]
-
-
-
-
 @router.get("/users")
-async def get_all_users() -> list[User]:
-    if len(users) == 0:
-        return Response(status_code=status.HTTP_204_NO_CONTENT)
-    return users
+async def get_all_users(currentUser: Annotated[User, Depends(decode_token)]) -> List[User]:
+    cursor = mydb.cursor(dictionary=True)
+    if currentUser.role == 'admin':
+        query = "SELECT * FROM User WHERE idCompany=%s"
+        cursor.execute(query, (currentUser.idCompany,))
+        users = cursor.fetchall()
+    elif currentUser.role == 'maintainer':
+        query = "SELECT * FROM User"
+        cursor.execute(query)
+        users = cursor.fetchall()
+    else: 
+        raise HTTPException(status_code=403, detail="Logged-in user is not allowed to access this resource")
+    return [User(**user) for user in users]
 
-
-@router.get("/users/search")
-async def search_users(name: str):
-    return list(filter(lambda x: x["name"] == name, users))
 
 @router.get("/users/{user_id}")
-async def get_user_by_id(user_id: int, name: str | None = None):
-    filtred_list = list(filter(lambda x: x["id"] == user_id, users))
-    if name is not None:
-        filtred_list = list(filter(lambda x: x["name"] == name, users))
-    return filtred_list
+async def get_user_by_id(currentUser: Annotated[User, Depends(decode_token)], user_id: int, name: Optional[str] = None) -> User:
+    cursor = mydb.cursor(dictionary=True)
+    query = "SELECT * FROM User WHERE id=%s"
+    cursor.execute(query, (user_id,))
+    user = cursor.fetchone()
+    if currentUser.role != 'admin' and currentUser.role != 'maintainer' or user is not None and currentUser.role == 'admin' and currentUser.idCompany != user['idCompany']:
+        raise HTTPException(status_code=403, detail="Logged-in user is not allowed to access this resource")
+    elif user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    elif name is not None and user['name'] != name:
+        raise HTTPException(status_code=404, detail="User not found")
+    elif currentUser.role == 'admin' and currentUser.idCompany == user['idCompany'] or currentUser.role == 'maintainer' :
+        return User(**user)
 
-@router.post("/users", status_code=status.HTTP_201_CREATED)
-async def create_user(new_user: User) -> User:
+
+@router.post("/users")
+async def create_user(currentUser: Annotated[User, Depends(decode_token)], new_user: User, password: Optional[str] = Body(None, description="User password")) -> User:
+    if currentUser.role != 'admin' and currentUser.role != 'maintainer':
+        raise HTTPException(status_code=403, detail="Logged-in user is not allowed to create new users")
+    cursor = mydb.cursor(dictionary=True)
+    query = "SELECT * FROM User"
+    cursor.execute(query)
+    users = cursor.fetchall()
     for user in users:
         if user["id"] == new_user.id:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A user with this id already exists")
-    users.append(new_user)
+    if currentUser.role == 'admin' and currentUser.idCompany != new_user.idCompany:
+         raise HTTPException(status_code=403, detail="Logged-in user is not allowed to create new users in a different company")
+    insert_query = "INSERT INTO User (id, name, surname, email, password, role, idCompany) VALUES (%s, %s,%s, %s, %s, %s, %s)"
+    data = (new_user.id, new_user.name, new_user.surname ,new_user.email, password, new_user.role, new_user.idCompany)
+    cursor.execute(insert_query, data)
+    mydb.commit()
     return new_user
 
-@router.delete("/users/{user_id}")
-async def delete_user(user_id: int) -> User:
-    user_to_delete = list(filter(lambda x: x["id"] == user_id, users))
-    if len(user_to_delete) == 0:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND) # No need for "details", a 404 is self explanatory
-    # The bellow two line should not happen id we manage our date correctly and the id is indeed unique
-    # but interesting for the example.
-    if len(user_to_delete) > 1:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="We find more than one user with this id, cannot delete")
-    users.remove(user_to_delete[0])
-    return Response(status_code = status.HTTP_200_OK)
-
-
 @router.put("/users/{user_id}")
-async def put_user(user_id: int, user: User) -> User:
-    for i in range(0, len(users)):
-        if users[i]["id"] == user_id:
-            users[i] = user.__dict__ # The .__dict__ is needed because we decided to init our list as dicts
-    return Response(status_code = status.HTTP_200_OK)
-    # no need to return anything in a PUT, a 200 will be returned by default
+async def update_user(user_id: int, currentUser: Annotated[User, Depends(decode_token)], updated_user: User, password: Optional[str] = Body(None, description="User password")) -> User:
+    if currentUser.role != 'admin' and currentUser.role != 'maintainer':
+        raise HTTPException(status_code=403, detail="Logged-in user is not allowed to update users")
+    cursor = mydb.cursor(dictionary=True)
+    query = "SELECT * FROM User WHERE id=%s"
+    cursor.execute(query, (user_id,))
+    user_to_update = cursor.fetchone()
+    if user_to_update is None:
+        raise HTTPException(status_code=404, detail="User not found") 
+    elif currentUser.role == 'admin' and currentUser.idCompany != user_to_update["idCompany"]:
+        raise HTTPException(status_code=403, detail="Logged-in user is not allowed to update users in a different company")
+    else:
+        updated_name = user_to_update['name'] if updated_user.name is None or updated_user.name == "string" else updated_user.name
+        updated_surname = user_to_update['surname'] if updated_user.surname is None or updated_user.surname == "string" else updated_user.surname
+        updated_email = user_to_update['email'] if updated_user.email is None or updated_user.email == "string" else updated_user.email
+        updated_password = user_to_update['password'] if password is None or password == "string" else password
+        updated_role = user_to_update['role'] if updated_user.role is None or updated_user.role == "string" else updated_user.role
+        # Modification de l'user 
+        update_query = "UPDATE User SET name=%s, surname=%s, email=%s, password=%s, role=%s WHERE id=%s"
+        data = (updated_name, updated_surname ,updated_email, updated_password, updated_role, user_id)
+        cursor.execute(update_query, data)
+        mydb.commit()
+        # Récupération de l'user modifié
+        query = "SELECT * FROM User WHERE id=%s"
+        cursor.execute(query, (user_id,))
+        updated_user = cursor.fetchone()
+        return User(**updated_user)
+
+
+@router.delete("/users/{user_id}")
+async def delete_user(currentUser: Annotated[User, Depends(decode_token)],user_id: int) -> User:
+    if currentUser.role != 'admin' and currentUser.role != 'maintainer':
+        raise HTTPException(status_code=403, detail="Logged-in user is not allowed to delete users")
+    cursor = mydb.cursor(dictionary=True)
+    query = "SELECT * FROM User WHERE id=%s"
+    cursor.execute(query, (user_id,))
+    user_to_delete = cursor.fetchone()
+    if currentUser.role == 'admin' and currentUser.idCompany != user_to_delete['idCompany']:
+        raise HTTPException(status_code=403, detail="Logged-in user is not allowed to delete users in a different company")
+    elif user_to_delete is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    else :
+        delete_query = "DELETE FROM User WHERE id=%s"
+        cursor.execute(delete_query, (user_id,))
+        mydb.commit()
+        return User(**user_to_delete)
+    
+
