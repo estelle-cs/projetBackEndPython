@@ -9,16 +9,17 @@ from internal.models import User
 from database import mydb
 from internal.auth import decode_token
 
-
 router = APIRouter()
 
 @router.get("/users")
 async def get_all_users(currentUser: Annotated[User, Depends(decode_token)]) -> List[User]:
     cursor = mydb.cursor(dictionary=True)
+    # Si l'user a le role admin : on renvoit les users de la même entreprise
     if currentUser.role == 'admin':
         query = "SELECT * FROM User WHERE idCompany=%s"
         cursor.execute(query, (currentUser.idCompany,))
         users = cursor.fetchall()
+    # Si maintainer : on renvoit tous les users 
     elif currentUser.role == 'maintainer':
         query = "SELECT * FROM User"
         cursor.execute(query)
@@ -34,12 +35,14 @@ async def get_user_by_id(currentUser: Annotated[User, Depends(decode_token)], us
     query = "SELECT * FROM User WHERE id=%s"
     cursor.execute(query, (user_id,))
     user = cursor.fetchone()
+    # On vérifie si le role est user et dans ce cas on renvoit une erreur 403
     if currentUser.role != 'admin' and currentUser.role != 'maintainer' or user is not None and currentUser.role == 'admin' and currentUser.idCompany != user['idCompany']:
         raise HTTPException(status_code=403, detail="Logged-in user is not allowed to access this resource")
     elif user is None:
         raise HTTPException(status_code=404, detail="User not found")
     elif name is not None and user['name'] != name:
         raise HTTPException(status_code=404, detail="User not found")
+    #On vérifie si le role est admin + si l'user fait partie de son entreprise ou si le role est maintainer
     elif currentUser.role == 'admin' and currentUser.idCompany == user['idCompany'] or currentUser.role == 'maintainer' :
         return User(**user)
 
@@ -55,6 +58,7 @@ async def create_user(currentUser: Annotated[User, Depends(decode_token)], new_u
     for user in users:
         if user["id"] == new_user.id:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A user with this id already exists")
+    # On vérifie si le role est admin et que l'user ne fait pas partie de l'entreprise
     if currentUser.role == 'admin' and currentUser.idCompany != new_user.idCompany:
          raise HTTPException(status_code=403, detail="Logged-in user is not allowed to create new users in a different company")
     insert_query = "INSERT INTO User (id, name, surname, email, password, role, idCompany) VALUES (%s, %s,%s, %s, %s, %s, %s)"
@@ -65,6 +69,7 @@ async def create_user(currentUser: Annotated[User, Depends(decode_token)], new_u
 
 @router.put("/users/{user_id}")
 async def update_user(user_id: int, currentUser: Annotated[User, Depends(decode_token)], updated_user: User, password: Optional[str] = Body(None, description="User password")) -> User:
+    # Si le role est user on renvoit une erreur :
     if currentUser.role != 'admin' and currentUser.role != 'maintainer':
         raise HTTPException(status_code=403, detail="Logged-in user is not allowed to update users")
     cursor = mydb.cursor(dictionary=True)
@@ -95,6 +100,7 @@ async def update_user(user_id: int, currentUser: Annotated[User, Depends(decode_
 
 @router.delete("/users/{user_id}")
 async def delete_user(currentUser: Annotated[User, Depends(decode_token)],user_id: int) -> User:
+    # Si le role est user on renvoit une erreur :
     if currentUser.role != 'admin' and currentUser.role != 'maintainer':
         raise HTTPException(status_code=403, detail="Logged-in user is not allowed to delete users")
     cursor = mydb.cursor(dictionary=True)

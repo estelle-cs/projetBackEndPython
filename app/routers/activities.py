@@ -3,7 +3,6 @@
 #Libs imports
 from typing import Annotated, List, Optional
 from fastapi import APIRouter, status, HTTPException, Depends, Body
-import datetime
 
 #Local imports
 from internal.models import User, Activity
@@ -16,13 +15,16 @@ router = APIRouter()
 @router.get("/activities")
 async def get_all_activities(currentUser: Annotated[User, Depends(decode_token)]) -> List[Activity]:
     cursor = mydb.cursor(dictionary=True)
+    # Récupération du planning pour avoir l'id de l'entreprise
     planning_query = "SELECT id FROM Planning WHERE idCompany=%s"
     cursor.execute(planning_query, (currentUser.idCompany,))
     planning_ids = [planning['id'] for planning in cursor.fetchall()]
+    # Vérifie si l'user est admin ou user pour renvoyer seulement les activités de son entreprise
     if currentUser.role == 'admin' or currentUser.role == 'user':
         query = "SELECT * FROM Activity WHERE idPlanning IN ({})".format(','.join(map(str, planning_ids)))
         cursor.execute(query)
         activities = cursor.fetchall()
+    # Si l'user est maintainer il récupère toutes les activités
     elif currentUser.role == 'maintainer':
         query = "SELECT * FROM Activity"
         cursor.execute(query)
@@ -38,9 +40,11 @@ async def get_activity_by_id(currentUser: Annotated[User, Depends(decode_token)]
     query = "SELECT * FROM Activity WHERE id=%s"
     cursor.execute(query, (activity_id,))
     activity = cursor.fetchone()
+    # Récupération du planning pour avoir l'id de l'entreprise
     query_planning = "SELECT * FROM Planning WHERE id=%s"
     cursor.execute(query_planning, (activity['id'],))
     planning = cursor.fetchone()
+    # Si le role est admin ou user, on vérifie que l'activité fait partie de son entreprise
     if (currentUser.role == 'admin' or currentUser.role == 'user') and activity is not None and planning["idCompany"] != currentUser.idCompany:
         raise HTTPException(status_code=403, detail="Logged-in user is not allowed to access this resource")
     elif activity is None:
@@ -58,9 +62,11 @@ async def create_activity(currentUser: Annotated[User, Depends(decode_token)], n
     for activity in activities:
         if activity["id"] == new_activity.id:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="An activity with this id already exists")
+    # Récupération du planning pour avoir l'id de l'entreprise
     query_planning = "SELECT * FROM Planning WHERE id=%s"
     cursor.execute(query_planning, (new_activity['idPlanning'],))
     planning = cursor.fetchone()
+    # Si le role est admin ou user, on vérifie que l'activité fait partie de son entreprise
     if (currentUser.role == 'admin' or currentUser.role == 'user') and currentUser.idCompany != planning.idCompany:
          raise HTTPException(status_code=403, detail="Logged-in user is not allowed to create new activities in a different company")
     insert_query = "INSERT INTO Activity (id, idPlanning, idOwner, name, day, startTime, endTime) VALUES (%s, %s, %s, %s, %s, %s, %s)"
@@ -80,10 +86,12 @@ async def update_activity(activity_id: int, currentUser: Annotated[User, Depends
     query_planning = "SELECT * FROM Planning WHERE id=%s"
     cursor.execute(query_planning, (activity_to_update['idPlanning'],))
     planning = cursor.fetchone()
+    # On vérifie pour les users qu'ils sont les owners de l'activité pour pouvoir la modifier
     if currentUser.role != 'admin' and currentUser.role != 'maintainer' and (currentUser.role == 'user' and currentUser.id != activity_to_update['idOwner']):
         raise HTTPException(status_code=403, detail="Logged-in user is not allowed to update this activity")
     if activity_to_update is None:
         raise HTTPException(status_code=404, detail="Activity not found")
+    # On vérifie pour les user ou admin si l'activité fait partie de leur entreprise
     elif (currentUser.role == 'admin' or currentUser.role == 'user') and currentUser.idCompany != planning["idCompany"]:
         raise HTTPException(status_code=403, detail="Logged-in user is not allowed to update activities in a different company")
     else:
@@ -117,6 +125,7 @@ async def subscribe_unsuscribe_activity(activity_id: int, currentUser: Annotated
     planning = cursor.fetchone()
     if activity_to_update is None:
         raise HTTPException(status_code=404, detail="Activity not found") 
+    # On vérifie pour les user ou admin si l'activité fait partie de leur entreprise
     elif (currentUser.role == 'admin' or currentUser.role == 'user') and currentUser.idCompany != planning["idCompany"]:
         raise HTTPException(status_code=403, detail="Logged-in user is not allowed to subscribe to activities in a different company")
     else:
@@ -154,8 +163,10 @@ async def delete_activity(currentUser: Annotated[User, Depends(decode_token)], a
     query_planning = "SELECT * FROM Planning WHERE id=%s"
     cursor.execute(query_planning, (activity_to_delete['idPlanning'],))
     planning = cursor.fetchone()
+    # On vérifie pour les user ou admin si owner de l'activité
     if currentUser.role != 'admin' and currentUser.role != 'maintainer' and (currentUser.role == 'user' and currentUser.id != activity_to_delete['idOwner']):
         raise HTTPException(status_code=403, detail="Logged-in user is not allowed to delete activities")
+    # On vérifie pour les user ou admin si l'activité fait partie de leur entreprise
     elif (currentUser.role == 'admin' or currentUser.role == 'user') and currentUser.idCompany != planning["idCompany"]:
         raise HTTPException(status_code=403, detail="Logged-in user is not allowed to delete activity in a different company")
     elif activity_to_delete is None:

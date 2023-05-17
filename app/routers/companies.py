@@ -14,6 +14,7 @@ router = APIRouter()
 
 @router.get("/companies")
 async def get_all_companies(currentUser: Annotated[User, Depends(decode_token)]) -> List[Company]:
+    # On vérifie que l'user a le role maintainer 
     if currentUser.role == 'maintainer':
         cursor = mydb.cursor(dictionary=True)
         query = "SELECT * FROM Company"
@@ -25,6 +26,7 @@ async def get_all_companies(currentUser: Annotated[User, Depends(decode_token)])
 
 @router.get("/companies/{company_id}")
 async def get_company_by_id(currentUser: Annotated[User, Depends(decode_token)], company_id: int, name: Optional[str] = None) -> Company:
+    # On vérifie que l'user a le role maintainer 
     if currentUser.role == 'maintainer':
         cursor = mydb.cursor(dictionary=True)
         query = "SELECT * FROM User WHERE id=%s"
@@ -42,6 +44,7 @@ async def get_company_by_id(currentUser: Annotated[User, Depends(decode_token)],
 
 @router.post("/companies")
 async def create_company(currentUser: Annotated[User, Depends(decode_token)], new_company: Company) -> Company:
+    # On vérifie que l'user a le role maintainer 
     if currentUser.role == 'maintainer':
         cursor = mydb.cursor(dictionary=True)
         query = "SELECT * FROM Company"
@@ -61,6 +64,7 @@ async def create_company(currentUser: Annotated[User, Depends(decode_token)], ne
 
 @router.put("/companies/{company_id}")
 async def update_company(company_id: int, currentUser: Annotated[User, Depends(decode_token)], updated_company: Company) -> Company:
+    # On vérifie que l'user a le role maintainer 
     if currentUser.role == 'maintainer':
         cursor = mydb.cursor(dictionary=True)
         query = "SELECT * FROM Company WHERE id=%s"
@@ -84,6 +88,7 @@ async def update_company(company_id: int, currentUser: Annotated[User, Depends(d
 
 @router.delete("/companies/{company_id}")
 async def delete_company(currentUser: Annotated[User, Depends(decode_token)],company_id: int) -> Company:
+    # On vérifie que l'user a le role maintainer 
     if currentUser.role == 'maintainer':
         cursor = mydb.cursor(dictionary=True)
         query = "SELECT * FROM Company WHERE id=%s"
