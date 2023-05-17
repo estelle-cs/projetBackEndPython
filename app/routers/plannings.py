@@ -14,10 +14,12 @@ router = APIRouter()
 @router.get("/plannings")
 async def get_all_plannings(currentUser: Annotated[User, Depends(decode_token)]) -> List[Planning]:
     cursor = mydb.cursor(dictionary=True)
+    # Si l'user a le role admin ou user : on renvoit les planning de leur entreprise
     if currentUser.role == 'admin' or currentUser.role == 'user':
         query = "SELECT * FROM Planning WHERE idCompany=%s"
         cursor.execute(query, (currentUser.idCompany,))
         plannings = cursor.fetchall()
+    # Si maintainer : on renvoit tous les planning 
     elif currentUser.role == 'maintainer':
         query = "SELECT * FROM Planning"
         cursor.execute(query)
@@ -33,6 +35,7 @@ async def get_planning_by_id(currentUser: Annotated[User, Depends(decode_token)]
     query = "SELECT * FROM Planning WHERE id=%s"
     cursor.execute(query, (planning_id,))
     planning = cursor.fetchone()
+    # Si le role est admin ou user : on vérifie si le planning fait partie de leur entreprise
     if (currentUser.role == 'admin' or currentUser.role == 'user') and planning is not None and planning["idCompany"] != currentUser.idCompany:
         raise HTTPException(status_code=403, detail="Logged-in user is not allowed to access this resource")
     elif planning is None:
@@ -52,6 +55,7 @@ async def create_planning(currentUser: Annotated[User, Depends(decode_token)], n
     for planning in plannings:
         if planning["id"] == new_planning.id:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A planning with this id already exists")
+    # Si le role est admin : on vérifie si le planning fait partie de son entreprise
     if currentUser.role == 'admin' and currentUser.idCompany != new_planning.idCompany:
          raise HTTPException(status_code=403, detail="Logged-in user is not allowed to create new plannings in a different company")
     insert_query = "INSERT INTO Planning (id, idCompany) VALUES (%s, %s)"
@@ -70,6 +74,7 @@ async def update_planning(planning_id: int, currentUser: Annotated[User, Depends
     planning_to_update = cursor.fetchone()
     if planning_to_update is None:
         raise HTTPException(status_code=404, detail="Planning not found") 
+    # Si le role est admin : on vérifie si le planning fait partie de son entreprise
     elif currentUser.role == 'admin' and currentUser.idCompany != planning_to_update["idCompany"]:
         raise HTTPException(status_code=403, detail="Logged-in user is not allowed to update plannings in a different company")
     else:
@@ -93,6 +98,7 @@ async def delete_planning(currentUser: Annotated[User, Depends(decode_token)], p
     query = "SELECT * FROM Planning WHERE id=%s"
     cursor.execute(query, (planning_id,))
     planning_to_delete = cursor.fetchone()
+    # Si le role est admin : on vérifie si le planning fait partie de son entreprise
     if currentUser.role == 'admin' and currentUser.idCompany != planning_to_delete['idCompany']:
         raise HTTPException(status_code=403, detail="Logged-in user is not allowed to delete planning in a different company")
     elif planning_to_delete is None:
