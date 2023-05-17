@@ -4,6 +4,7 @@
 import datetime
 import typing
 from pydantic import BaseModel
+from typing import List, Optional
 
 #Local imports
 
@@ -21,14 +22,14 @@ class Company(BaseModel):
 
 class Planning(BaseModel):
     id: int
-    day: datetime.date
-    startTime: datetime.time
-    endTime: datetime.time
-    concernedUsers: typing.List
-    activities: typing.List
+    idCompany: int
 
 class Activity(BaseModel):
     id: int
+    idPlanning: int
+    idOwner: int
     name: str
-    idPlanning: typing.List
+    day: datetime.date
+    startTime: str
+    endTime: str
 
